@@ -59,12 +59,20 @@ from custom_components.elegoo_printer.sdcp.models.status import (
     PrinterStatus,
 )
 from custom_components.elegoo_printer.sdcp.models.video import ElegooVideo
+from custom_components.elegoo_printer.sdcp.models.enums import ElegooPrintStatus
+from custom_components.elegoo_printer.sdcp.const import (
+    FILE_TRANSFER_STATUS_DONE,
+    FILE_TRANSFER_STATUS_ERROR,
+)
 from custom_components.elegoo_printer.mqtt.file_server import ElegooFileHost
 
 from .const import (
     MQTT_KEEPALIVE,
     MQTT_PORT,
     MQTT_TOPIC_MIN_PARTS,
+    START_PRINT_RETRIES,
+    START_PRINT_WAIT_SECONDS,
+    FILE_UPLOAD_TIMEOUT_SECONDS,
     TOPIC_ATTRIBUTES,
     TOPIC_ERROR,
     TOPIC_NOTICE,
@@ -129,6 +137,15 @@ class ElegooMqttClient:
     async def disconnect(self) -> None:
         """Disconnect from the printer."""
         self.logger.info("Closing MQTT connection to printer")
+
+        # Stop file host if running
+        if self._file_host:
+            try:
+                await self._file_host.stop()
+            except Exception:
+                self.logger.exception("Error stopping file host")
+            finally:
+                self._file_host = None
 
         # Send disconnect command to printer if connected
         if self._is_connected and self.mqtt_client:
@@ -286,18 +303,22 @@ class ElegooMqttClient:
             raise ElegooPrinterNotConnectedError("Not connected to MQTT broker")
 
         data = {"Filename": filename, "StartLayer": int(start_layer)}
-        await self._send_printer_cmd(CMD_START_PRINT, data)
+        try:
+            await self._send_printer_cmd(CMD_START_PRINT, data)
+        except (ElegooPrinterConnectionError, ElegooPrinterTimeoutError) as e:
+            self.logger.error("Failed to send start print command: %s", e)
+            return False
 
-        # Watch a few status updates to confirm transition into printing
+        # Watch status updates to confirm transition into printing
         tries = 0
-        while tries < 5:
-            await asyncio.sleep(1)
+        while tries < START_PRINT_RETRIES:
+            await asyncio.sleep(START_PRINT_WAIT_SECONDS)
             status = self.printer_data.status
-            if status and status.current_status is not None:
-                # Any active print status value indicates success
-                if status.print_info and status.print_info.status is not None:
+            if status and status.print_info and status.print_info.status:
+                if status.print_info.status == ElegooPrintStatus.PRINTING:
                     return True
             tries += 1
+        self.logger.warning("Start print verification timed out after %s tries", START_PRINT_RETRIES)
         return False
 
     async def upload_file_from_path(
@@ -320,10 +341,18 @@ class ElegooMqttClient:
         # Ensure file host is running
         if self._file_host is None:
             self._file_host = ElegooFileHost()
-            await self._file_host.start()
+            try:
+                await self._file_host.start()
+            except Exception as e:
+                self.logger.error("Failed to start file host: %s", e)
+                raise ElegooPrinterConnectionError("File host startup failed") from e
 
         # Register file and build command payload
-        hosted = await self._file_host.register_file(path, name=display_name)
+        try:
+            hosted = await self._file_host.register_file(path, name=display_name)
+        except Exception as e:
+            self.logger.error("Failed to register file: %s", e)
+            raise
 
         # Compute local IP the printer will reach (same node as MQTT broker)
         local_ip = PrinterData.get_local_ip(self.printer.ip_address)
@@ -347,8 +376,10 @@ class ElegooMqttClient:
 
         # Wait for completion by watching status updates that carry FileTransferInfo
         try:
-            # 10 minutes max (large files)
-            await asyncio.wait_for(self._wait_for_file_transfer_end(), timeout=600)
+            await asyncio.wait_for(
+                self._wait_for_file_transfer_end(),
+                timeout=FILE_UPLOAD_TIMEOUT_SECONDS,
+            )
         except asyncio.TimeoutError:
             LOGGER.warning("File upload timed out")
             await self._file_host.unregister_file(hosted.name)
@@ -361,7 +392,7 @@ class ElegooMqttClient:
             return False
 
         status_code = self._file_transfer_status.get("Status")
-        if status_code == 2:  # DONE
+        if status_code == FILE_TRANSFER_STATUS_DONE:
             if start_when_done:
                 filename = self._file_transfer_status.get("Filename") or (
                     display_name or os.path.basename(path)
@@ -380,7 +411,7 @@ class ElegooMqttClient:
             if not self._file_transfer_status:
                 continue
             st = self._file_transfer_status.get("Status")
-            if st in (2, 3):  # DONE or ERROR
+            if st in (FILE_TRANSFER_STATUS_DONE, FILE_TRANSFER_STATUS_ERROR):
                 return
 
     def discover_printer(

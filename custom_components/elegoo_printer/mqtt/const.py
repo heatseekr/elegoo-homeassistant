@@ -25,3 +25,8 @@ TOPIC_ERROR = "error"
 
 # MQTT topic parsing: sdcp/{message_type}/{printer_id}
 MQTT_TOPIC_MIN_PARTS = 3
+
+# Timeouts / retries
+FILE_UPLOAD_TIMEOUT_SECONDS = 600  # 10 minutes
+START_PRINT_RETRIES = 10
+START_PRINT_WAIT_SECONDS = 1

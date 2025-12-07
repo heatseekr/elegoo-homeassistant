@@ -1,0 +1,59 @@
+upload_file:
+  name: Upload File
+  description: Upload a local file to the printer (MQTT printers only).
+  fields:
+    entity_id:
+      description: Target entity from the Elegoo Printer integration.
+      example: sensor.elegoo_printer_status
+    device_id:
+      description: Target device (alternative to entity_id).
+      example: 123456abcdef
+    path:
+      required: true
+      description: Absolute path to the file on the Home Assistant host.
+      example: /config/www/models/benchy.gcode
+    start_when_done:
+      default: false
+      description: Start printing automatically when upload finishes.
+    filename:
+      description: Optional display name on the printer.
+
+start_print:
+  name: Start Print
+  description: Start printing a file that already exists on the printer.
+  fields:
+    entity_id:
+      description: Target entity from the Elegoo Printer integration.
+    device_id:
+      description: Target device (alternative to entity_id).
+    filename:
+      required: true
+      description: The printer-side filename to print.
+      example: benchy.gcode
+    start_layer:
+      default: 0
+      description: Optional start layer index.
+
+schedule_print:
+  name: Schedule Print
+  description: Schedule an upload and/or start-print for a specific time.
+  fields:
+    entity_id:
+      description: Target entity from the Elegoo Printer integration.
+    device_id:
+      description: Target device (alternative to entity_id).
+    when:
+      required: true
+      description: ISO 8601 datetime when the job should run (local time).
+      example: 2025-12-31T23:55:00
+    filename:
+      description: Printer-side filename to print (if not uploading).
+    path:
+      description: Absolute path to local file to upload.
+    start_layer:
+      default: 0
+      description: Optional start layer index when using filename.
+    start_when_done:
+      default: true
+      description: If uploading, automatically start the print after upload completes.
+

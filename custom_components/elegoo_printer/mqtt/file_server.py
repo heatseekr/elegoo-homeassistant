@@ -112,13 +112,21 @@ class ElegooFileHost:
         resp = web.StreamResponse(status=200, headers=headers)
         await resp.prepare(request)
 
-        with open(hosted.path, "rb") as f:  # noqa: PTH123
-            while True:
-                data = f.read(1024 * 1024)
-                if not data:
-                    break
-                await resp.write(data)
+        loop = asyncio.get_running_loop()
+
+        def _reader(path: str, offset: int, size: int = 1024 * 1024) -> bytes:
+            with open(path, "rb") as f:  # noqa: PTH123
+                f.seek(offset)
+                return f.read(size)
+
+        offset = 0
+        chunk_size = 1024 * 1024
+        while True:
+            data = await loop.run_in_executor(None, _reader, hosted.path, offset, chunk_size)
+            if not data:
+                break
+            offset += len(data)
+            await resp.write(data)
 
         await resp.write_eof()
         return resp
-

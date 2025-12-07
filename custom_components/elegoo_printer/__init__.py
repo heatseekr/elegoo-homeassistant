@@ -39,6 +39,7 @@ from .coordinator import ElegooDataUpdateCoordinator
 from .data import ElegooPrinterData
 from .websocket.server import ElegooPrinterServer
 from homeassistant.helpers.event import async_track_point_in_time
+from homeassistant.util import dt as dt_util
 from datetime import datetime
 import voluptuous as vol
 from homeassistant.helpers import config_validation as cv
@@ -233,21 +234,47 @@ def _register_services(hass) -> None:
             LOGGER.warning("'when' is required for schedule_print")
             return
         try:
-            when_dt = datetime.fromisoformat(when_str)
-        except ValueError:
-            LOGGER.warning("Invalid ISO datetime for 'when': %s", when_str)
+            when_dt = dt_util.parse_datetime(when_str)
+            if when_dt is None:
+                LOGGER.warning("Invalid datetime for 'when': %s", when_str)
+                return
+            # Ensure timezone-aware; convert naive to local time
+            if when_dt.tzinfo is None:
+                when_dt = dt_util.as_local(when_dt)
+        except Exception:
+            LOGGER.warning("Invalid datetime for 'when': %s", when_str)
             return
+
+        # Store entry_id to resolve API at execution time in case of reload/unload
+        entry_id: str | None = None
+        if getattr(api, "_config_entry", None) is not None:
+            entry_id = getattr(api._config_entry, "entry_id", None)
 
         async def _run_scheduled(_now) -> None:
             try:
+                # Re-resolve API if possible to avoid using a stale reference
+                current_api = api
+                if entry_id:
+                    entry = hass.config_entries.async_get_entry(entry_id)
+                    if entry and getattr(entry, "runtime_data", None):
+                        current_api = entry.runtime_data.api
+
                 if path:
-                    await api.async_upload_file(
+                    if not current_api:
+                        LOGGER.warning("No active printer available for scheduled upload")
+                        return
+                    await current_api.async_upload_file(
                         path,
                         start_when_done=start_when_done,
                         display_name=call.data.get("filename"),
                     )
                 elif filename:
-                    await api.async_start_print(filename, start_layer=start_layer)
+                    if not current_api:
+                        LOGGER.warning("No active printer available for scheduled start")
+                        return
+                    await current_api.async_start_print(
+                        filename, start_layer=start_layer
+                    )
                 else:
                     LOGGER.warning("Either 'path' or 'filename' required for schedule_print")
             except Exception as e:  # noqa: BLE001

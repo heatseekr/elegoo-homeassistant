@@ -61,3 +61,8 @@ CMD_AMS_UNLOADING = 505
 
 # MQTT Auto-Push Commands
 CMD_SET_STATUS_UPDATE_PERIOD = 512  # Tell printer to auto-push status updates
+
+# File transfer status codes
+# Match printer's FileTransferInfo.Status values
+FILE_TRANSFER_STATUS_DONE = 2
+FILE_TRANSFER_STATUS_ERROR = 3
