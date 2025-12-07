@@ -44,15 +44,8 @@ async def async_setup_entry(
             [ElegooSimpleButton(coordinator, description)], update_before_add=True
         )
 
-    # Add optional control buttons (Upload Default, Start Default Filename)
-    async_add_entities(
-        [
-            ElegooUploadDefaultFileButton(coordinator),
-            ElegooStartDefaultFilenameButton(coordinator),
-            ElegooStartLastUploadedButton(coordinator),
-        ],
-        update_before_add=True,
-    )
+    # Optional: Start last uploaded helper
+    async_add_entities([ElegooStartLastUploadedButton(coordinator)], update_before_add=True)
 
 
 class ElegooSimpleButton(ElegooPrinterEntity, ButtonEntity):
@@ -96,65 +89,7 @@ class ElegooSimpleButton(ElegooPrinterEntity, ButtonEntity):
         return self.entity_description.available_fn(self._elegoo_printer_client)
 
 
-class ElegooUploadDefaultFileButton(ElegooPrinterEntity, ButtonEntity):
-    """Uploads a default file defined in Options and optionally starts print."""
-
-    def __init__(self, coordinator: ElegooDataUpdateCoordinator) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = coordinator.generate_unique_id("upload_default_file")
-        self._attr_name = "Upload Default File"
-
-    async def async_press(self) -> None:
-        entry = self.coordinator.config_entry
-        settings = {**(entry.data or {}), **(entry.options or {})}
-        path = settings.get(CONF_DEFAULT_UPLOAD_PATH)
-        start_when_done = bool(settings.get(CONF_DEFAULT_START_WHEN_DONE, False))
-        api = entry.runtime_data.api
-        if not path:
-            LOGGER.warning("No default_upload_path set in Options")
-            return
-        await api.async_upload_file(path, start_when_done=start_when_done)
-        await self.coordinator.async_request_refresh()
-
-    @property
-    def available(self) -> bool:
-        if not super().available:
-            return False
-        entry = self.coordinator.config_entry
-        settings = {**(entry.data or {}), **(entry.options or {})}
-        path = settings.get(CONF_DEFAULT_UPLOAD_PATH)
-        # Upload currently only supported for MQTT transport
-        client = entry.runtime_data.api.client
-        return bool(path) and getattr(client, "upload_file_from_path", None) is not None
-
-
-class ElegooStartDefaultFilenameButton(ElegooPrinterEntity, ButtonEntity):
-    """Starts a print using a default filename from Options."""
-
-    def __init__(self, coordinator: ElegooDataUpdateCoordinator) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = coordinator.generate_unique_id("start_default_filename")
-        self._attr_name = "Start Default Filename"
-
-    async def async_press(self) -> None:
-        entry = self.coordinator.config_entry
-        settings = {**(entry.data or {}), **(entry.options or {})}
-        filename = settings.get(CONF_DEFAULT_START_FILENAME)
-        api = entry.runtime_data.api
-        if not filename:
-            LOGGER.warning("No default_start_filename set in Options")
-            return
-        await api.async_start_print(filename)
-        await self.coordinator.async_request_refresh()
-
-    @property
-    def available(self) -> bool:
-        if not super().available:
-            return False
-        entry = self.coordinator.config_entry
-        settings = {**(entry.data or {}), **(entry.options or {})}
-        filename = settings.get(CONF_DEFAULT_START_FILENAME)
-        return bool(filename)
+## Removed default-based buttons per UX change request
 
 
 class ElegooStartLastUploadedButton(ElegooPrinterEntity, ButtonEntity):

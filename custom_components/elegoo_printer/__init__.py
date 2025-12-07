@@ -40,6 +40,9 @@ from .data import ElegooPrinterData
 from .websocket.server import ElegooPrinterServer
 from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.util import dt as dt_util
+from homeassistant.components.http import HomeAssistantView
+from aiohttp import web
+import os
 from datetime import datetime
 import voluptuous as vol
 from homeassistant.helpers import config_validation as cv
@@ -121,11 +124,14 @@ async def async_setup_entry(
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
-    # Register services once
+    # Register services and views once
     domain_store = hass.data.setdefault(DOMAIN, {})
     if not domain_store.get("services_registered"):
         _register_services(hass)
         domain_store["services_registered"] = True
+    if not domain_store.get("views_registered"):
+        hass.http.register_view(ElegooUploadView(hass))
+        domain_store["views_registered"] = True
 
     return True
 
@@ -187,6 +193,32 @@ def _register_services(hass) -> None:
                 vol.Optional("device_id"): cv.string,
                 vol.Required("path"): cv.path,
                 vol.Optional("start_when_done", default=False): cv.boolean,
+                vol.Optional("filename"): cv.string,
+            }
+        ),
+    )
+
+    async def handle_upload_and_print(call: ServiceCall) -> None:
+        api = _get_api_for_service(hass, call)
+        if not api:
+            LOGGER.warning("No printer resolved for upload_and_print service")
+            return
+        path = call.data.get("path")
+        display_name = call.data.get("filename")
+        if not path:
+            LOGGER.warning("'path' is required for upload_and_print")
+            return
+        await api.async_upload_file(path, start_when_done=True, display_name=display_name)
+
+    hass.services.async_register(
+        DOMAIN,
+        "upload_and_print",
+        handle_upload_and_print,
+        schema=vol.Schema(
+            {
+                vol.Optional("entity_id"): cv.entity_id,
+                vol.Optional("device_id"): cv.string,
+                vol.Required("path"): cv.path,
                 vol.Optional("filename"): cv.string,
             }
         ),
@@ -298,6 +330,147 @@ def _register_services(hass) -> None:
             }
         ),
     )
+
+    async def handle_schedule_upload_and_print(call: ServiceCall) -> None:
+        api = _get_api_for_service(hass, call)
+        if not api:
+            LOGGER.warning("No printer resolved for schedule_upload_and_print service")
+            return
+        when_str = call.data.get("when")
+        path = call.data.get("path")
+        display_name = call.data.get("filename")
+        if not when_str or not path:
+            LOGGER.warning("'when' and 'path' are required for schedule_upload_and_print")
+            return
+        when_dt = dt_util.parse_datetime(when_str)
+        if when_dt is None:
+            LOGGER.warning("Invalid datetime for 'when': %s", when_str)
+            return
+        if when_dt.tzinfo is None:
+            when_dt = dt_util.as_local(when_dt)
+
+        async def _run_scheduled(_now) -> None:
+            try:
+                await api.async_upload_file(
+                    path,
+                    start_when_done=True,
+                    display_name=display_name,
+                )
+            except Exception as e:  # noqa: BLE001
+                LOGGER.exception("Scheduled upload_and_print failed: %s", e)
+
+        async_track_point_in_time(hass, _run_scheduled, when_dt)
+
+    hass.services.async_register(
+        DOMAIN,
+        "schedule_upload_and_print",
+        handle_schedule_upload_and_print,
+        schema=vol.Schema(
+            {
+                vol.Optional("entity_id"): cv.entity_id,
+                vol.Optional("device_id"): cv.string,
+                vol.Required("when"): cv.string,
+                vol.Required("path"): cv.path,
+                vol.Optional("filename"): cv.string,
+            }
+        ),
+    )
+
+
+class ElegooUploadView(HomeAssistantView):
+    """Simple uploader page to Upload & Print or Schedule."""
+
+    url = "/api/elegoo_printer/upload"
+    name = "api:elegoo_printer:upload"
+    requires_auth = True
+
+    def __init__(self, hass) -> None:
+        self.hass = hass
+
+    async def get(self, request):
+        entity_id = request.rel_url.query.get("entity_id", "")
+        device_id = request.rel_url.query.get("device_id", "")
+        html = f"""
+<!DOCTYPE html>
+<html><head><meta charset='utf-8'><title>Upload & Print</title></head>
+<body>
+  <h2>Upload & Print File</h2>
+  <form method='POST' enctype='multipart/form-data'>
+    <input type='hidden' name='entity_id' value='{entity_id}' />
+    <input type='hidden' name='device_id' value='{device_id}' />
+    <div><label>File: <input type='file' name='file' required /></label></div>
+    <div><label>Display Name (optional): <input type='text' name='filename' /></label></div>
+    <div><button type='submit' name='action' value='print'>Upload & Print</button></div>
+  </form>
+  <hr/>
+  <h3>Upload & Schedule</h3>
+  <form method='POST' enctype='multipart/form-data'>
+    <input type='hidden' name='entity_id' value='{entity_id}' />
+    <input type='hidden' name='device_id' value='{device_id}' />
+    <div><label>File: <input type='file' name='file' required /></label></div>
+    <div><label>Display Name (optional): <input type='text' name='filename' /></label></div>
+    <div><label>When: <input type='datetime-local' name='when' required /></label></div>
+    <div><button type='submit' name='action' value='schedule'>Upload & Schedule</button></div>
+  </form>
+  <p>Tip: pass entity_id or device_id as query params to target a specific printer.</p>
+</body></html>
+        """
+        return web.Response(text=html, content_type="text/html")
+
+    async def post(self, request):
+        data = await request.post()
+        entity_id = data.get("entity_id")
+        device_id = data.get("device_id")
+        filename_override = data.get("filename")
+        action = data.get("action")
+        upload_field = data.get("file")
+        when_str = data.get("when")
+
+        # Resolve API
+        call = ServiceCall(DOMAIN, "upload", {"entity_id": entity_id, "device_id": device_id})
+        api = _get_api_for_service(self.hass, call)
+        if not api:
+            return web.Response(status=400, text="Unable to resolve printer from entity_id/device_id")
+
+        # Save file to temporary uploads dir
+        uploads_dir = self.hass.config.path("elegoo_uploads")
+        os.makedirs(uploads_dir, exist_ok=True)
+        if not hasattr(upload_field, "filename"):
+            return web.Response(status=400, text="No file uploaded")
+        saved_path = os.path.join(uploads_dir, upload_field.filename)
+        with open(saved_path, "wb") as f:
+            f.write(upload_field.file.read())
+
+        try:
+            if action == "schedule":
+                when_dt = dt_util.parse_datetime(when_str) if when_str else None
+                if when_dt is None:
+                    return web.Response(status=400, text="Invalid datetime")
+                if when_dt.tzinfo is None:
+                    when_dt = dt_util.as_local(when_dt)
+
+                async def _run_scheduled(_now) -> None:
+                    await api.async_upload_file(
+                        saved_path,
+                        start_when_done=True,
+                        display_name=filename_override,
+                    )
+
+                async_track_point_in_time(self.hass, _run_scheduled, when_dt)
+                return web.Response(text="Scheduled upload & print.")
+
+            # Default: immediate upload & print
+            ok = await api.async_upload_file(
+                saved_path,
+                start_when_done=True,
+                display_name=filename_override,
+            )
+            if ok:
+                return web.Response(text="Upload started. Printing when ready.")
+            return web.Response(status=500, text="Upload failed or unsupported transport")
+        except Exception as e:  # noqa: BLE001
+            LOGGER.exception("Upload view error: %s", e)
+            return web.Response(status=500, text=f"Error: {e}")
 
 
 async def async_unload_entry(

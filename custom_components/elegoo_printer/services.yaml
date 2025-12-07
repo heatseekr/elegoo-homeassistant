@@ -18,6 +18,20 @@ upload_file:
     filename:
       description: Optional display name on the printer.
 
+upload_and_print:
+  name: Upload & Print File
+  description: Upload a local file and immediately start printing (MQTT only).
+  fields:
+    entity_id:
+      description: Target entity from the Elegoo Printer integration.
+    device_id:
+      description: Target device (alternative to entity_id).
+    path:
+      required: true
+      description: Absolute path to the file on the Home Assistant host.
+    filename:
+      description: Optional display name on the printer.
+
 start_print:
   name: Start Print
   description: Start printing a file that already exists on the printer.
@@ -57,3 +71,19 @@ schedule_print:
       default: true
       description: If uploading, automatically start the print after upload completes.
 
+schedule_upload_and_print:
+  name: Upload & Schedule File Print
+  description: Upload a local file and schedule it to print at a specific time.
+  fields:
+    entity_id:
+      description: Target entity from the Elegoo Printer integration.
+    device_id:
+      description: Target device (alternative to entity_id).
+    path:
+      required: true
+      description: Absolute path to the file on the Home Assistant host.
+    filename:
+      description: Optional display name on the printer.
+    when:
+      required: true
+      description: When to start the print (local time). Use the datetime picker in the UI.
