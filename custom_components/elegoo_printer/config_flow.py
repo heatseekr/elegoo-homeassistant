@@ -15,6 +15,9 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     CONF_CAMERA_ENABLED,
+    CONF_DEFAULT_START_FILENAME,
+    CONF_DEFAULT_START_WHEN_DONE,
+    CONF_DEFAULT_UPLOAD_PATH,
     CONF_EXTERNAL_IP,
     CONF_PROXY_ENABLED,
     DOMAIN,
@@ -580,9 +583,18 @@ class ElegooOptionsFlowHandler(config_entries.OptionsFlow):
                 tested_printer.proxy_enabled = user_input[CONF_PROXY_ENABLED]
                 tested_printer.external_ip = user_input.get(CONF_EXTERNAL_IP)
                 LOGGER.debug("Tested printer: %s", tested_printer.to_dict_safe())
+                tested_dict = tested_printer.to_dict()
+                # Include default control settings in options
+                for k in (
+                    CONF_DEFAULT_UPLOAD_PATH,
+                    CONF_DEFAULT_START_WHEN_DONE,
+                    CONF_DEFAULT_START_FILENAME,
+                ):
+                    if k in user_input:
+                        tested_dict[k] = user_input[k]
                 return self.async_create_entry(
                     title=tested_printer.name,
-                    data=tested_printer.to_dict(),
+                    data=tested_dict,
                 )
             except ElegooConfigFlowConnectionError as exception:
                 LOGGER.error("Connection error: %s", exception)
@@ -612,6 +624,25 @@ class ElegooOptionsFlowHandler(config_entries.OptionsFlow):
             ),
             vol.Optional(
                 CONF_EXTERNAL_IP,
+            ): selector.TextSelector(
+                selector.TextSelectorConfig(
+                    type=selector.TextSelectorType.TEXT,
+                ),
+            ),
+            vol.Optional(
+                CONF_DEFAULT_UPLOAD_PATH,
+            ): selector.TextSelector(
+                selector.TextSelectorConfig(
+                    type=selector.TextSelectorType.TEXT,
+                ),
+            ),
+            vol.Optional(
+                CONF_DEFAULT_START_WHEN_DONE,
+            ): selector.BooleanSelector(
+                selector.BooleanSelectorConfig(),
+            ),
+            vol.Optional(
+                CONF_DEFAULT_START_FILENAME,
             ): selector.TextSelector(
                 selector.TextSelectorConfig(
                     type=selector.TextSelectorType.TEXT,

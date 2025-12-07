@@ -26,6 +26,11 @@ CONF_PROXY_VIDEO_PORT = "proxy_video_port"
 # MQTT settings (always uses embedded broker)
 CONF_MQTT_BROKER_ENABLED = "mqtt_broker_enabled"
 
+# Defaults for Controls
+CONF_DEFAULT_UPLOAD_PATH = "default_upload_path"
+CONF_DEFAULT_START_WHEN_DONE = "default_start_when_done"
+CONF_DEFAULT_START_FILENAME = "default_start_filename"
+
 # Websocket and proxy settings
 DEFAULT_BROADCAST_ADDRESS = "255.255.255.255"
 DEFAULT_FALLBACK_IP = "8.8.8.8"
