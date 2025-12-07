@@ -26,6 +26,7 @@ from custom_components.elegoo_printer.const import (
 from custom_components.elegoo_printer.sdcp.const import (
     CMD_CONTINUE_PRINT,
     CMD_CONTROL_DEVICE,
+    CMD_RETRIEVE_FILE_LIST,
     CMD_START_PRINT,
     CMD_PAUSE_PRINT,
     CMD_REQUEST_ATTRIBUTES,
@@ -56,6 +57,7 @@ from custom_components.elegoo_printer.sdcp.models.status import (
     PrinterStatus,
 )
 from custom_components.elegoo_printer.sdcp.models.video import ElegooVideo
+from custom_components.elegoo_printer.sdcp.models.file_info import FileInfo
 
 if TYPE_CHECKING:
     from custom_components.elegoo_printer.sdcp.models.enums import ElegooFan
@@ -348,6 +350,11 @@ class ElegooPrinterClient:
                 return True
             tries += 1
         return False
+
+    async def async_get_file_list(self) -> dict[str, FileInfo]:
+        """Retrieve the list of files available on the printer."""
+        await self._send_printer_cmd(CMD_RETRIEVE_FILE_LIST)
+        return self.printer_data.file_list
 
     async def set_print_speed(self, percentage: int) -> None:
         """
@@ -677,6 +684,8 @@ class ElegooPrinterClient:
                     self._print_history_detail_handler(data_data)
                 elif cmd == CMD_SET_VIDEO_STREAM:
                     self._print_video_handler(data_data)
+                elif cmd == CMD_RETRIEVE_FILE_LIST:
+                    self._file_list_handler(data_data)
         except json.JSONDecodeError:
             self.logger.exception("Invalid JSON")
 
@@ -745,6 +754,19 @@ class ElegooPrinterClient:
 
         """
         self.printer_data.video = ElegooVideo(data_data)
+
+    def _file_list_handler(self, data_data: dict[str, Any]) -> None:
+        """Parse and update the printer's file list from response data."""
+        file_list = data_data.get("FileList", [])
+        if file_list:
+            self.printer_data.file_list.clear()
+            for file_data in file_list:
+                file_info = FileInfo(file_data)
+                if file_info.filename:
+                    self.printer_data.file_list[file_info.filename] = file_info
+            self.logger.debug(
+                "Updated file list with %d files", len(self.printer_data.file_list)
+            )
 
     async def _set_response_event(self, request_id: str) -> asyncio.Event:
         """Set the event for a given request ID."""

@@ -139,6 +139,16 @@ class ElegooPrinterSelectEntityDescription(SelectEntityDescription):
 
 
 @dataclass(kw_only=True)
+class ElegooPrinterDynamicSelectEntityDescription(SelectEntityDescription):
+    """Select entity description with dynamic options for Elegoo Printers."""
+
+    options_fn: Callable[..., list[str]]
+    current_option_fn: Callable[..., str | None]
+    select_option_fn: Callable[..., Coroutine[Any, Any, None]]
+    available_fn: Callable[..., bool] = lambda printer_data: printer_data
+
+
+@dataclass(kw_only=True)
 class ElegooPrinterNumberEntityDescription(NumberEntityDescription):
     """Number entity description for Elegoo Printers."""
 
@@ -697,6 +707,29 @@ PRINTER_SELECT_TYPES: tuple[ElegooPrinterSelectEntityDescription, ...] = (
             else None
         ),
         select_option_fn=lambda api, value: api.async_set_print_speed(value),
+    ),
+)
+
+# Dynamic file select to start prints from printer storage
+from .sdcp.models.enums import ElegooMachineStatus  # noqa: E402
+
+PRINTER_FILE_SELECT: tuple[ElegooPrinterDynamicSelectEntityDescription, ...] = (
+    ElegooPrinterDynamicSelectEntityDescription(
+        key="print_file",
+        name="Print File",
+        icon="mdi:file-document",
+        entity_category=EntityCategory.CONFIG,
+        options_fn=lambda printer_data: (
+            sorted(list(printer_data.file_list.keys()))
+            if printer_data and printer_data.file_list
+            else []
+        ),
+        current_option_fn=lambda _printer_data: None,
+        select_option_fn=lambda api, filename: api.async_start_print(filename),
+        available_fn=lambda printer_data: (
+            bool(printer_data)
+            and printer_data.status.current_status != ElegooMachineStatus.PRINTING
+        ),
     ),
 )
 

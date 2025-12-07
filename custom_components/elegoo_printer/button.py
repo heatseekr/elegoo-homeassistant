@@ -49,6 +49,7 @@ async def async_setup_entry(
         [
             ElegooUploadDefaultFileButton(coordinator),
             ElegooStartDefaultFilenameButton(coordinator),
+            ElegooStartLastUploadedButton(coordinator),
         ],
         update_before_add=True,
     )
@@ -154,3 +155,28 @@ class ElegooStartDefaultFilenameButton(ElegooPrinterEntity, ButtonEntity):
         settings = {**(entry.data or {}), **(entry.options or {})}
         filename = settings.get(CONF_DEFAULT_START_FILENAME)
         return bool(filename)
+
+
+class ElegooStartLastUploadedButton(ElegooPrinterEntity, ButtonEntity):
+    """Starts the last successfully uploaded file."""
+
+    def __init__(self, coordinator: ElegooDataUpdateCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = coordinator.generate_unique_id("start_last_uploaded")
+        self._attr_name = "Start Last Uploaded"
+
+    async def async_press(self) -> None:
+        api = self.coordinator.config_entry.runtime_data.api
+        filename = api.printer_data.last_uploaded_filename
+        if not filename:
+            LOGGER.warning("No last uploaded filename available")
+            return
+        await api.async_start_print(filename)
+        await self.coordinator.async_request_refresh()
+
+    @property
+    def available(self) -> bool:
+        if not super().available:
+            return False
+        api = self.coordinator.config_entry.runtime_data.api
+        return bool(api.printer_data.last_uploaded_filename)

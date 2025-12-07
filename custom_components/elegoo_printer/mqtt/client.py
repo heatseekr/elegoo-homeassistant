@@ -27,6 +27,7 @@ from custom_components.elegoo_printer.const import (
 from custom_components.elegoo_printer.sdcp.const import (
     CMD_CONTINUE_PRINT,
     CMD_CONTROL_DEVICE,
+    CMD_RETRIEVE_FILE_LIST,
     CMD_START_PRINT,
     CMD_DISCONNECT,
     CMD_PAUSE_PRINT,
@@ -50,6 +51,7 @@ from custom_components.elegoo_printer.sdcp.models.attributes import PrinterAttri
 from custom_components.elegoo_printer.sdcp.models.print_history_detail import (
     PrintHistoryDetail,
 )
+from custom_components.elegoo_printer.sdcp.models.file_info import FileInfo
 from custom_components.elegoo_printer.sdcp.models.printer import (
     Printer,
     PrinterData,
@@ -321,6 +323,11 @@ class ElegooMqttClient:
         self.logger.warning("Start print verification timed out after %s tries", START_PRINT_RETRIES)
         return False
 
+    async def async_get_file_list(self) -> dict[str, FileInfo]:
+        """Retrieve the list of files available on the printer."""
+        await self._send_printer_cmd(CMD_RETRIEVE_FILE_LIST)
+        return self.printer_data.file_list
+
     async def upload_file_from_path(
         self,
         path: str,
@@ -397,7 +404,15 @@ class ElegooMqttClient:
                 filename = self._file_transfer_status.get("Filename") or (
                     display_name or os.path.basename(path)
                 )
+                # Track last uploaded filename in printer_data
+                self.printer_data.last_uploaded_filename = filename
                 return await self.start_print(filename)
+            # Track last uploaded filename in printer_data
+            self.printer_data.last_uploaded_filename = (
+                self._file_transfer_status.get("Filename")
+                or display_name
+                or os.path.basename(path)
+            )
             return True
         return False
 
@@ -926,6 +941,8 @@ class ElegooMqttClient:
                 self._print_history_detail_handler(data_data)
             elif cmd == CMD_SET_VIDEO_STREAM:
                 self._print_video_handler(data_data)
+            elif cmd == CMD_RETRIEVE_FILE_LIST:
+                self._file_list_handler(data_data)
             # Signal waiters after handlers have updated state to avoid races
             request_id = inner_data.get("RequestID")
             if request_id:
@@ -1084,6 +1101,19 @@ class ElegooMqttClient:
 
         """
         self.printer_data.video = ElegooVideo(data_data)
+
+    def _file_list_handler(self, data_data: dict[str, Any]) -> None:
+        """Parse and update the printer's file list from response data."""
+        file_list = data_data.get("FileList", [])
+        if file_list:
+            self.printer_data.file_list.clear()
+            for file_data in file_list:
+                file_info = FileInfo(file_data)
+                if file_info.filename:
+                    self.printer_data.file_list[file_info.filename] = file_info
+            self.logger.debug(
+                "Updated file list with %d files", len(self.printer_data.file_list)
+            )
 
     def _set_response_event_sync(self, request_id: str) -> None:
         """Set the event for a given request ID (synchronous wrapper)."""

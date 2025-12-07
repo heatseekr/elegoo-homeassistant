@@ -29,6 +29,7 @@ from .sdcp.exceptions import ElegooPrinterConnectionError
 from .sdcp.models.elegoo_image import ElegooImage
 from .sdcp.models.enums import TransportType
 from .sdcp.models.printer import Printer, PrinterData
+from .sdcp.models.file_info import FileInfo
 from .websocket.client import ElegooPrinterClient
 from .websocket.server import ElegooPrinterServer
 
@@ -725,6 +726,11 @@ class ElegooPrinterApiClient:
 
         """  # noqa: E501
         return await self.client.async_get_printer_historical_tasks()
+
+    async def async_get_file_list(self) -> dict[str, FileInfo]:
+        """Retrieve the list of files available on the printer."""
+        # Both MQTT and WebSocket clients implement async_get_file_list
+        return await self.client.async_get_file_list()
 
     async def set_fan_speed(self, percentage: int, fan: ElegooFan) -> None:
         """Set the speed of a fan."""

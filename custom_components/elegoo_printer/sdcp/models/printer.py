@@ -27,6 +27,7 @@ from .video import ElegooVideo
 if TYPE_CHECKING:
     from .print_history_detail import PrintHistoryDetail
 from typing import TypedDict
+from .file_info import FileInfo
 
 
 class FirmwareUpdateInfo(TypedDict, total=False):
@@ -322,6 +323,8 @@ class PrinterData:
     current_job: PrintHistoryDetail | None
     video: ElegooVideo
     firmware_update_info: FirmwareUpdateInfo
+    last_uploaded_filename: str | None
+    file_list: dict[str, FileInfo]
 
     def __init__(
         self,
@@ -344,6 +347,8 @@ class PrinterData:
             "package_url": None,
             "changelog": None,
         }
+        self.last_uploaded_filename: str | None = None
+        self.file_list: dict[str, FileInfo] = {}
 
     def round_minute(self, date: datetime | None = None, round_to: int = 1) -> datetime:
         """Round datetime object to minutes."""
